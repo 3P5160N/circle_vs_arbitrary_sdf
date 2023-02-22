@@ -20,6 +20,20 @@
             ctx.stroke()
         }
 
+        function drawHexagon(p, r) {
+            ctx.beginPath()
+            ctx.moveTo(p[0]- r, p[1])
+
+            for (let i = 1; i < 7; ++i) {
+                const a = (270 + 360 / 6 * i) * Math.PI / 180
+                const x = p[0] + Math.sin(a) * r
+                const y = p[1] + Math.cos(a) * r
+                ctx.lineTo(x, y)
+            }
+
+            ctx.stroke()
+        }
+
         function drawBox(p, s) {
             ctx.beginPath()
             ctx.rect(p[0] - s[0], p[1] - s[1], s[0] * 2, s[1] * 2)
@@ -30,6 +44,30 @@
             ctx.beginPath()
             ctx.moveTo(a[0], a[1])
             ctx.lineTo(b[0], b[1])
+            ctx.stroke()
+        }
+
+        function normalize(v) {
+            const l = length(v)
+
+            return [v[0] / l, v[1] / l]
+        }
+
+        function drawSine(a, b, freq, amp) {
+            const ba = subtract(b, a)
+            const perp = normalize([ba[1], -ba[0]])
+            const n = normalize(ba)
+            const l = length(ba)
+            const c = 100
+
+            ctx.moveTo(a[0], a[1])
+
+            for (let i = 0; i < c + 1; ++i) {
+                const t = l / c * i
+                const sn = Math.sin(t / l * freq) * amp
+                ctx.lineTo(a[0] + n[0] * t + perp[0] * sn, a[1] + n[1] * t + perp[1] * sn)
+            }
+
             ctx.stroke()
         }
 
@@ -60,6 +98,23 @@
             s: [60, 60]
         }
 
+        const hexagon = {
+            p: [0, 300],
+            r: 60
+        }
+
+        const line = {
+            a: [400, 400],
+            b: [200, -200]
+        }
+
+        const sine = {
+            a: [-400, 400],
+            b: [-200, -200],
+            freq: 10,
+            amp: 20
+        }
+
         function length(v) {
             return Math.sqrt(v[0] ** 2 + v[1] ** 2)
         }
@@ -76,8 +131,20 @@
             return [Math.max(v[0], s), Math.max(v[1], s)]
         }
 
+        function min(v, s) {
+            return [Math.min(v[0], s), Math.min(v[1], s)]
+        }
+
         function subtract(a, b) {
             return [a[0] - b[0], a[1] - b[1]]
+        }
+
+        function multiply(a, b) {
+            return [a[0] * b[0], a[1] * b[1]]
+        }
+
+        function multiplyScalar(a, b) {
+            return [a[0] * b, a[1] * b]
         }
 
         function sdBox(p, s) {
@@ -86,20 +153,73 @@
             return length(max(d, 0)) + Math.min(Math.max(d[0], d[1]), 0)
         }
 
+        function dot(a, b) {
+            return a[0] * b[0] + a[1] * b[1]
+        }
+
+        function clamp(v, mn, mx) {
+            return Math.min(Math.max(v, mn), mx)
+        }
+
+        function sdHexagon(p, r) {
+            const k = [-0.866025404, 0.5, 0.577350269]
+            p = abs(p)
+            p = subtract(p, multiplyScalar(k, 2 * Math.min(dot(k, p), 0.0)))
+            p = subtract(p, [clamp(p[0], -k[2] * r, k[2] * r), r * -k[0]])
+
+            return length(p) * Math.sign(p[1])
+        }
+
+        function sdLine(p, a, b) {
+            const pa = subtract(p, a)
+            const ba = subtract(b, a)
+            const h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0)
+
+            return length(subtract(pa, multiplyScalar(ba, h)))
+        }
+
+        function sdSine(p, a, b, freq, amp) {
+            const pa = subtract(p, a)
+            const ba = subtract(b, a)
+            const perp = normalize([ba[1], -ba[0]])
+            const h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0)
+            const out = subtract(pa, multiplyScalar(ba, h))
+            const sn = Math.sin(h * freq) * amp
+
+            return length([out[0] - perp[0] * sn, out[1] - perp[1] * sn])
+        }
+
         function map(p) {
             const c1 = sdCircle(subtract(p, circle1.p), circle1.r)
             const c2 = sdCircle(subtract(p, circle2.p), circle2.r)
             const b1 = sdBox(subtract(p, box1.p), box1.s)
             const b2 = sdBox(subtract(p, box2.p), box2.s)
+            const h1 = sdHexagon(subtract(p, hexagon.p), hexagon.r)
+            const l1 = sdLine(p, line.a, line.b)
+            const s1 = sdSine(p, sine.a, sine.b, sine.freq, sine.amp)
 
-            return Math.min(c1, c2, b1, b2)
+            return Math.min(c1, c2, b1, b2, h1, l1, s1)
         }
 
-        const p = mp
+        const p = [0, 0]
         const r = 30
+        const vel = [0, 0]
+        const acc = [0.1, 0.1]
+        const maxVel = 5
+        const airFriction = 0.99
+        const friction = 0.5
+        const keys = {}
+
+        window.addEventListener("keydown", (event) => {
+            keys[event.key] = true
+        })
+
+        window.addEventListener("keyup", (event) => {
+            keys[event.key] = false
+        })
 
         const downscaling = 100
-        const subdivision = 100
+        const subdivision = 12
         const rDownscaled = r / downscaling
 
         function calcQuadrant(p) {
@@ -114,9 +234,27 @@
         }
 
         function draw() {
-            const quadrant = calcQuadrant(p)
-            const qx = [p[0] + quadrant[0] * rDownscaled, p[1]]
-            const qy = [p[0], p[1] + quadrant[1] * rDownscaled]
+            if (keys['a']) {
+                vel[0] -= acc[0]
+            }
+
+            if (keys['d']) {
+                vel[0] += acc[0]
+            }
+
+            if (keys['s']) {
+                vel[1] -= acc[0]
+            }
+
+            if (keys['w']) {
+                vel[1] += acc[0]
+            }
+
+            vel[0] = clamp(vel[0] * airFriction, -maxVel, maxVel)
+            vel[1] = clamp(vel[1] * airFriction, -maxVel, maxVel)
+            p[0] += vel[0]
+            p[1] += vel[1]
+
             const d0 = map(p) - r
 
             clear()
@@ -124,8 +262,14 @@
             drawCircle(circle2.p, circle2.r)
             drawBox(box1.p, box1.s)
             drawBox(box2.p, box2.s)
+            drawHexagon(hexagon.p, hexagon.r)
+            drawLine(line.a, line.b)
+            drawSine(sine.a, sine.b, sine.freq, sine.amp)
 
             if (d0 < 0) {
+                const quadrant = calcQuadrant(p)
+                const qx = [p[0] + quadrant[0] * rDownscaled, p[1]]
+                const qy = [p[0], p[1] + quadrant[1] * rDownscaled]
                 const d1 = map(qx)
                 const d2 = map(qy)
                 let nearDir = d1 < d2 ? [quadrant[0], 0] : [0, quadrant[1]]
@@ -144,11 +288,16 @@
                 }
 
                 ctx.strokeStyle = "#ff0000"
-                drawCircle([p[0] + nearDir[0] * d0, p[1] + nearDir[1] * d0], r)
+                p[0] = p[0] + nearDir[0] * (d0 - 1)
+                p[1] = p[1] + nearDir[1] * (d0 - 1)
+                const tvel = subtract(vel, multiplyScalar(nearDir, 2 * dot(vel, nearDir)))
+                vel[0] = tvel[0] * friction
+                vel[1] = tvel[1] * friction
             } else {
                 ctx.strokeStyle = "#000000"
-                drawCircle(p, r)
             }
+
+            drawCircle(p, r)
 
             requestAnimationFrame(draw)
         }
