@@ -1,0 +1,181 @@
+<body style="margin: 0;">
+    <script>
+        const canvas = document.createElement('canvas')
+        canvas.width = window.innerWidth
+        canvas.height = window.innerHeight
+        document.body.append(canvas)
+        const gl = canvas.getContext('webgl2')
+        const viewport = [canvas.width, canvas.height]
+        const mp = [0, 0]
+
+        window.addEventListener('mousemove', e => {
+            mp[0] = e.clientX
+            mp[1] = viewport[1] - e.clientY
+        })
+
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth
+            canvas.height = window.innerHeight
+            viewport[0] = canvas.width
+            viewport[1] = canvas.height
+        })
+
+        const vss = `#version 300 es
+            in vec2 iPosition;
+
+            void main() {
+                gl_Position = vec4(iPosition, 0.0, 1.0);
+            }
+        `
+
+        const fss = `#version 300 es
+            precision mediump float;
+            out vec4 oFragColor;
+            uniform vec2 uViewport;
+            uniform vec2 uMousePosition;
+            uniform float uRadius;
+            uniform float uDownscaling;
+            uniform float uSubdivision;
+
+            float circle(vec2 p, float r) {
+                return length(p) - r;
+            }
+
+            float box(vec2 p, vec2 s) {
+                vec2 q = abs(p) - s;
+
+                return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
+            }
+
+            float hexagon(vec2 p, float r) {
+                const vec3 k = vec3(-0.866025404, 0.5, 0.577350269);
+                p = abs(p);
+                p -= 2.0 * min(dot(k.xy, p), 0.0) * k.xy;
+                p -= vec2(clamp(p.x, -k.z * r, k.z * r), r * -k[0]);
+    
+                return length(p) * sign(p.y);
+            }
+
+            float map(vec2 p, vec2 mp) {
+                float c1 = circle(p - mp, uRadius);
+                float c2 = circle(p - vec2(3.0, 3.0), 1.0);
+                float c3 = circle(p - vec2(-3.0, -3.0), 2.0);
+                float b1 = box(p - vec2(-3.0, 3.0), vec2(1.0, 2.0));
+                float b2 = box(p - vec2(3.0, -3.0), vec2(2.0));
+                float h1 = hexagon(p - vec2(8.0, 0.0), 1.5);
+
+                return min(min(min(min(min(c1, c2), c3), b1), b2), h1);
+            }
+
+
+
+            vec2 calcQuadrant(vec2 p) {
+                float dx1 = map(p - vec2(-1.0, 0.0), vec2(0.0));
+                float dx2 = map(p - vec2(1.0, 0.0), vec2(0.0));
+                float dy1 = map(p - vec2(0.0, -1.0), vec2(0.0));
+                float dy2 = map(p - vec2(0.0, 1.0), vec2(0.0));
+                float dxm = dx1 < dx2 ? -1.0 : 1.0;
+                float dym = dy1 < dy2 ? -1.0 : 1.0;
+
+                return vec2(-dxm, -dym);
+            }
+
+            vec2 resolveCollision(vec2 p) {
+                float d0 = map(p, vec2(1000.0)) - uRadius;
+
+                if (d0 < 0.0) {
+                    vec2 quadrant = calcQuadrant(p);
+                    vec2 qx = vec2(p.x + quadrant.x * uRadius / uDownscaling, p.y);
+                    vec2 qy = vec2(p.x, p.y + quadrant.y * uRadius / uDownscaling);
+                    float d1 = map(qx, vec2(1000.0));
+                    float d2 = map(qy, vec2(1000.0));
+                    vec2 nearDir = d1 < d2 ? vec2(quadrant.x, 0.0) : vec2(0.0, quadrant.y);
+                    float minDist = d1 < d2 ? d1 : d2;
+
+                    for (float a = 1.0; a < uSubdivision; ++a) {
+                        float angle = degrees(atan(quadrant.x, quadrant.y)) - 45.0 + 90.0 / uSubdivision * a;
+                        vec2 dirUnit = vec2(sin(radians(angle)), cos(radians(angle)));
+                        vec2 dir = p + dirUnit * uRadius / uDownscaling;
+                        float dist = map(dir, vec2(1000.0));
+
+                        if (dist < minDist) {
+                            nearDir = dirUnit;
+                            minDist = dist;
+                        }
+                    }
+
+                    return nearDir * d0;
+                }
+
+                return vec2(0.0);
+            }
+
+            void main() {
+                vec2 p = (gl_FragCoord.xy * 2.0 - uViewport) / uViewport.y * 8.0;
+                vec2 mp = (uMousePosition * 2.0 - uViewport) / uViewport.y * 8.0;
+
+                vec2 nearDir = resolveCollision(mp);
+                mp += nearDir;
+
+                float d = map(p, mp);
+                vec3 c = d < 0.0 ? vec3(1.0) : vec3(0.0);
+
+                oFragColor = vec4(c, 1.0);
+
+            }
+        `
+
+        const vs = gl.createShader(gl.VERTEX_SHADER)
+        gl.shaderSource(vs, vss)
+        gl.compileShader(vs)
+
+        const fs = gl.createShader(gl.FRAGMENT_SHADER)
+        gl.shaderSource(fs, fss)
+        gl.compileShader(fs)
+
+        const program = gl.createProgram()
+        gl.attachShader(program, vs)
+        gl.attachShader(program, fs)
+        gl.linkProgram(program)
+        gl.detachShader(program, vs)
+        gl.detachShader(program, fs)
+        gl.deleteShader(vs)
+        gl.deleteShader(fs)
+        gl.useProgram(program)
+
+        const positions = new Float32Array([
+            -1.0, 1.0,
+            -1.0, -1.0,
+            1.0, 1.0,
+            1.0, -1.0
+        ])
+
+        const vbo = gl.createBuffer()
+        gl.bindBuffer(gl.ARRAY_BUFFER, vbo)
+        gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW)
+        gl.enableVertexAttribArray(0)
+        gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 2 * Float32Array.BYTES_PER_ELEMENT, 0)
+
+        const viewportUniformLoc = gl.getUniformLocation(program, 'uViewport')
+        const mousePositionUniformLoc = gl.getUniformLocation(program, 'uMousePosition')
+        const radiusUniformLoc = gl.getUniformLocation(program, 'uRadius')
+        const downscalingUniformLoc = gl.getUniformLocation(program, 'uDownscaling')
+        const subdivisionUniformLoc = gl.getUniformLocation(program, 'uSubdivision')
+        const radius = 0.5
+        const downscaling = 100
+        const subdivision = 12
+        gl.uniform1f(radiusUniformLoc, radius)
+        gl.uniform1f(downscalingUniformLoc, downscaling)
+        gl.uniform1f(subdivisionUniformLoc, subdivision)
+
+        function draw() {
+            gl.uniform2fv(viewportUniformLoc, viewport)
+            gl.uniform2fv(mousePositionUniformLoc, mp)
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
+            requestAnimationFrame(draw)
+        }
+
+        draw()
+
+    </script>
+</body>

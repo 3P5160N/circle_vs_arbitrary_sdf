@@ -62,13 +62,27 @@
 
             ctx.moveTo(a[0], a[1])
 
-            for (let i = 0; i < c + 1; ++i) {
+            for (let i = 1; i < c + 1; ++i) {
                 const t = l / c * i
-                const sn = Math.sin(t / l * freq) * amp
-                ctx.lineTo(a[0] + n[0] * t + perp[0] * sn, a[1] + n[1] * t + perp[1] * sn)
+                const p = [a[0] + n[0] * t, a[1] + n[1] * t]
+                const pa = subtract(p, a)
+                const h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0)
+                const sn = Math.sin(h * freq) * amp
+                ctx.lineTo(a[0] + n[0] * l * h + perp[0] * sn, a[1] + n[1] * l * h + perp[1] * sn)
             }
 
             ctx.stroke()
+        }
+
+        function sdSine(p, a, b, freq, amp) {
+            const pa = subtract(p, a)
+            const ba = subtract(b, a)
+            const perp = normalize([ba[1], -ba[0]])
+            const h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0)
+            const out = subtract(pa, multiplyScalar(ba, h))
+            const sn = Math.sin(h * freq) * amp
+
+            return length([out[0] - perp[0] * sn, out[1] - perp[1] * sn])
         }
 
         const mp = [0, 0]
@@ -111,7 +125,7 @@
         const sine = {
             a: [-400, 400],
             b: [-200, -200],
-            freq: 10,
+            freq: 30,
             amp: 20
         }
 
@@ -178,17 +192,6 @@
             return length(subtract(pa, multiplyScalar(ba, h)))
         }
 
-        function sdSine(p, a, b, freq, amp) {
-            const pa = subtract(p, a)
-            const ba = subtract(b, a)
-            const perp = normalize([ba[1], -ba[0]])
-            const h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0)
-            const out = subtract(pa, multiplyScalar(ba, h))
-            const sn = Math.sin(h * freq) * amp
-
-            return length([out[0] - perp[0] * sn, out[1] - perp[1] * sn])
-        }
-
         function map(p) {
             const c1 = sdCircle(subtract(p, circle1.p), circle1.r)
             const c2 = sdCircle(subtract(p, circle2.p), circle2.r)
@@ -206,7 +209,7 @@
         const vel = [0, 0]
         const acc = [0.1, 0.1]
         const maxVel = 5
-        const airFriction = 0.99
+        const airFriction = 1
         const friction = 0.5
         const keys = {}
 
@@ -288,11 +291,14 @@
                 }
 
                 ctx.strokeStyle = "#ff0000"
+                drawLine(p, [p[0] + nearDir[0] * (d0 + r), p[1] + nearDir[1] * (d0 + r)])
                 p[0] = p[0] + nearDir[0] * (d0 - 1)
                 p[1] = p[1] + nearDir[1] * (d0 - 1)
                 const tvel = subtract(vel, multiplyScalar(nearDir, 2 * dot(vel, nearDir)))
                 vel[0] = tvel[0] * friction
                 vel[1] = tvel[1] * friction
+                // vel[0] = 0
+                // vel[1] = 0
             } else {
                 ctx.strokeStyle = "#000000"
             }
